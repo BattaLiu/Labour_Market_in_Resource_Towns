@@ -1,0 +1,102 @@
+---
+title: "match"
+author: "Batta Liu"
+date: '2017-02-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This code file tries to merge the SGC CSD and the location of mines. 
+```{r load packages}
+library(plyr)
+library(dplyr)
+library(readr)
+library(stringr)
+```
+First try: CSDs of 2011 and mine locaitons of 2012.
+```{r import data}
+subdiv <- read.csv("/Users/batta/Dropbox/phd4/monopsony/data/rdc-census-codebook/sub-division-census-2011.csv")
+mine.12 <- read.csv("/Users/batta/Dropbox/phd4/monopsony/map/mine_distribution_2013/900A_62nd_ProducingMines.csv")
+str(mine.12)
+str(subdiv)
+```
+
+```{r Match by city}
+mine.12$CITYE <- as.character(mine.12$CITYE)
+subdiv$Geographic.name <- as.character(subdiv$Geographic.name)
+subdiv$city <- gsub("^(.*)\\s\\(.*\\)", "\\1", subdiv$Geographic.name)
+subdiv$prov <- gsub("^(.*)\\s\\((.*)\\)", "\\2", subdiv$Geographic.name)
+subdiv$province <- gsub("(([:alpha:]{1}))[.](([:alpha:]{1}))","\\1\\2",subdiv$prov)
+test <- inner_join(mine.12, subdiv, by = c("CITYE" = "city"))
+str(subdiv$city)
+str(mine.12$CITYE)
+metal.mine <- test %>% 
+	filter(TYPECODE==1)
+
+```
+In the try above, 61 metal mines are matched with CSD in 2012. 
+Second try: use the location retreived manually form NRC website to match with CSDs of 2011. The result is 53 out of 104
+```{r match 1980}
+metal.mine.80 <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-30th-name.csv")
+keep <- c("PROVINCE","COMPANY","MINESITE","LOCATION")
+metal.mine.80 <-  metal.mine.80[keep]
+metal.mine.80$CITYE <- as.character(metal.mine.80$LOCATION)
+match.mine.8012 <- inner_join(metal.mine.80, subdiv, by = c("CITYE" = "city"))
+tmp <- match.mine.8012$CITYE
+duplicated(tmp)
+```
+
+```{r}
+width <- c(2,3,3,2,3,1,3,2,3,3,1,1,1,4,7,2,4,1,4,4,4,2,6,7,2,2,3,2,12,12,9,32,32,50,26)
+subdiv.81 <- read.fwf("/Users/batta/Dropbox/phd4/monopsony/data/gaf/gaf81.txt", widths = width)
+colnames(subdiv.81) <- c("prov", "fed", "ea81", "cd", "sgccsd", "csdgroup", "csdtype", "csdtypeco","ccs", "cma", "capart", "cmacaslect", "cmacagrp", "ctpct", "ctpctname", "subpr", "ur","urgrp", "eacnt", "phhcnt","familycnt", "poputm", "xcoord","ycoord", "popclat", "poplatmin", "poplongi", "poplongmin", "poplamxco", "poplamyco", "map","fedname", "cdname","csdname", "cmacaname")
+subdiv.81$prov1 <- as.character(subdiv.81$prov)
+subdiv.81$cd1 <- as.character(subdiv.81$cd)
+subdiv.81$sgccsd1 <- as.character(subdiv.81$sgccsd)
+cd1 <- subdiv.81$cd1
+sgccsd1 <- subdiv.81$sgccsd1
+for (i in 1: nrow(subdiv.81)) {
+	if (str_length(subdiv.81$cd1[i])==1) { cd1[i] <- paste0("0",subdiv.81$cd1[i]) }
+	if (str_length(subdiv.81$sgccsd1[i])==1){
+		sgccsd1[i] <- paste0("00",subdiv.81$sgccsd1[i]) 
+	} else if (str_length(subdiv.81$sgccsd1[i])==2) {
+		sgccsd1[i] <- paste0("0",subdiv.81$sgccsd1[i]) 
+	}
+}
+sgcfull <- paste0(subdiv.81$prov1, cd1, sgccsd1)
+subdiv.81$sgcfull <- sgcfull
+
+subdiv.81 <- subdiv.81 %>% 
+	select(sgcfull, csdname)
+subdiv.81$csdname <- as.character(subdiv.81$csdname)
+subdiv.81 <- unique(subdiv.81)
+subdiv.81$city <- gsub("(\\w)([[:space:]]*)$", "\\1", subdiv.81$csdname)
+metal.mine.80$CITYE <- gsub("(\\w)([[:space:]]*)$", "\\1", metal.mine.80$CITYE)
+metal.mine.80$CITYUP <- toupper(metal.mine.80$CITYE)
+match.mine.8081 <- inner_join(metal.mine.80, subdiv.81, by = c("CITYUP" = "city")) # 57 obs matched
+nonmatch.mine.8081 <- anti_join(metal.mine.80, subdiv.81, by = c("CITYUP" = "city")) #47 obs matched
+subdiv$cityup <- toupper(subdiv$city)
+tmp <- inner_join(subdiv.81, subdiv, by = c("city" = "cityup")) # 3620 obs matched
+write_csv(match.mine.8081, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-30th-matched1.csv")
+write_csv(nonmatch.mine.8081, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-30th-unmatched1.csv")
+
+```
+
+```{r compare the match 8012 and 8081}
+match8012 <- match.mine.8012 %>% 
+	select(CITYUP) %>% 
+	unique()
+	
+match8081 <- match.mine.8081 %>% 
+	select(CITYUP)%>% 
+	unique()
+
+same.csd.8112 <- inner_join(match8012, match8081)
+```
+Caution: match between mine locaiton and CSDs need to consider province.
+
+
+
+
