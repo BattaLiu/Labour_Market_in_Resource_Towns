@@ -21,6 +21,6 @@ Coal mines, Non-metal mines(except coal), Crude petroleum and natural gas indust
 information on principal operating mines and metallurgic works. 
 5. 
 ## [Regression 1](regression1.do)
-## [Regression 2](regression3-v1.do)
+## [Regression 2](regression3-v2.do)
 ## [Regression 3](regression3-v3.do)
 
