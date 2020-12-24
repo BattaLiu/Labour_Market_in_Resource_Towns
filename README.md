@@ -19,7 +19,7 @@ price of ore for mines with only a subset of those 7 metals.
 Coal mines, Non-metal mines(except coal), Crude petroleum and natural gas industries)...Full list of variables useed in research is in ??????
 4. Natural Resources Canada: Minerals and Mining Map. This map provides the
 information on principal operating mines and metallurgic works. 
-5. 
+5. mindat.org: coordinates of mines. This website gives a location-19**.Rmd files combine the [match.Rmd](match.Rmd) and [mindat-scraping.R](mindat-scraping.R) to locate the mines. Used files: NRC 900a map, GAF81-GAF06, boundary files of 2006. It generate an excel file with CSD info for mines at its best. 
 ## [Regression 1](regression1.do)
 ## [Regression 2](regression3-v2.do)
 ## [Regression 3](regression3-v3.do)
