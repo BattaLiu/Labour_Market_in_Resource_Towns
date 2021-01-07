@@ -1,0 +1,453 @@
+---
+title: "location1991"
+author: "Batta Liu"
+date: '2018-02-26'
+output: html_document
+---
+This Rmarkdown is a combination of match.Rmd and mindat-scraping.R. Used files: NRC 900a map, GAF81, boundary files of 2006. It generate an excel file with CSD info for mines at its best. Works to be done: add some test of the accuracy of search result, check whether there are electronic boundary file of 1980.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE}
+library(plyr)
+library(dplyr)
+library(readr)
+library(stringr)
+library(rvest)
+library(Rcrawler)
+library(data.table)
+library(RQGIS)
+library(rgdal)
+library(sp)
+library(raster)
+library(maptools)
+library(stringr)
+library(data.table)
+```
+
+# Get the CSD info from GAF81
+GAF81 contains a lot of information about enumeration arears. I use it to get 7-digit standard CSD code and then keep only province name, CSD code and CSD name for matching with mine location info from NRC map 900a.
+
+Important note about the gaf91. In abacus, there are several different data type of gaf91. The correct one is stored in "c91gtf.dat" and encoded "Windows-1252". I guess the sas and ssp code will also make it right. I compare the three most commonly used encoding: "UTF-8", "Windows-1252", and "latin1". Both of the latter two works on "c91gtf.dat".
+```{r}
+width <- c(2,3,3,2,3,7,3,3,1,3,1,1,7,4,7,2,4,7,4,3,1,2,6,7,9,10,12,12,9,50,50,50,3,50,50,50,50)
+subdiv.91 <- read.fwf("/Users/batta/Dropbox/phd4/monopsony/data/gaf/gaf91/Data/c91gtf.dat", widths = width, fileEncoding = "Windows-1252")
+colnames(subdiv.91) <- tolower(c("prov", "fed", "ea91", "cd", "sgccsd", "csfpop91","ccs", "cmaca", "cmatype", "pcmapcac","PCMATYPE", "CMAPART", "CMAPOP91", "CTCODE", "CTNAME", "SPRCODE", "URCODE", "URFPOP91", "EAFPOP91", "EAFPOD91", "EAIRFL91", "EAZONE", "EAXCOORD", "EAYCOORD", "LATITUDE", "LONGIT", "LAMBERTX", "LAMBERTY", "NTSMAPNO", "FEDNAME", "CDNAME", "CSDNAME", "CSDTYPE", "CCNAME", "CMANAME", "PCMANAME", "URNAME"))
+
+subdiv.91$prov1 <- as.character(subdiv.91$prov)
+subdiv.91$cd1 <- as.character(subdiv.91$cd)
+subdiv.91$sgccsd1 <- as.character(subdiv.91$sgccsd)
+cd1 <- subdiv.91$cd1
+sgccsd1 <- subdiv.91$sgccsd1
+for (i in 1: nrow(subdiv.91)) {
+	if (str_length(subdiv.91$cd1[i])==1) { cd1[i] <- paste0("0",subdiv.91$cd1[i]) }
+	if (str_length(subdiv.91$sgccsd1[i])==1){
+		sgccsd1[i] <- paste0("00",subdiv.91$sgccsd1[i]) 
+	} else if (str_length(subdiv.91$sgccsd1[i])==2) {
+		sgccsd1[i] <- paste0("0",subdiv.91$sgccsd1[i]) 
+	}
+}
+sgcfull <- paste0(subdiv.91$prov1, cd1, sgccsd1)
+subdiv.91$sgcfull <- sgcfull
+
+tmp <- as.character(subdiv.91$prov)
+tmp <- str_replace(tmp,"10", "NEWFOUNDLAND")
+tmp <- str_replace(tmp,"11", "PRINCE EDWARD ISLAND")
+tmp <- str_replace(tmp,"12", "NOVA SCOTIA")
+tmp <- str_replace(tmp,"13", "NEW BRUNSWICK")
+tmp <- str_replace(tmp,"24", "QUEBEC")
+tmp <- str_replace(tmp,"35", "ONTARIO")
+tmp <- str_replace(tmp,"46", "MANITOBA")
+tmp <- str_replace(tmp,"47", "SASKATCHEWAN")
+tmp <- str_replace(tmp,"48", "ALBERTA")
+tmp <- str_replace(tmp,"59", "BRITISH COLUMBIA")
+tmp <- str_replace(tmp,"60", "YUKON TERRITORY")
+tmp <- str_replace(tmp,"61", "NORTHWEST TERRITORIES")
+subdiv.91$provname <- tmp
+
+subdiv.91 <- subdiv.91 %>% 
+	dplyr::select(provname, sgcfull, csdname)
+subdiv.91$csdname <- as.character(subdiv.91$csdname)
+subdiv.91 <- unique(subdiv.91)
+subdiv.91$city <- gsub("(\\w)([[:space:]]*)$", "\\1", subdiv.91$csdname)
+subdiv.91$city <- toupper(subdiv.91$city)
+```
+# Match mine location info with CSD info
+```{r}
+metal.mine.90 <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-name.csv")
+keep <- c("PROVINCE","COMPANY","MINESITE","LOCATION")
+metal.mine.90 <-  metal.mine.90[keep]
+metal.mine.90$PROVINCE <- as.character(metal.mine.90$PROVINCE)
+metal.mine.90$CITYE <- as.character(metal.mine.90$LOCATION)
+metal.mine.90$CITYE <- gsub("(\\w)([[:space:]]*)$", "\\1", metal.mine.90$CITYE)
+metal.mine.90$CITYUP <- toupper(metal.mine.90$CITYE)
+match.mine.9091 <- inner_join(metal.mine.90, subdiv.91, by = c("PROVINCE"="provname", "CITYUP" = "city")) 
+unmatch.mine.9091 <- anti_join(metal.mine.90, subdiv.91, by = c("PROVINCE"="provname", "CITYUP" = "city")) 
+
+dup <- match.mine.9091 %>% 
+	dplyr::select("PROVINCE", "COMPANY", "MINESITE", "LOCATION") %>% 
+	duplicated(.)
+
+duplicated.test.match <- unique(match.mine.9091[dup, ])
+
+match.mine.9091 <- anti_join(match.mine.9091, duplicated.test.match, by = c("PROVINCE", "COMPANY", "MINESITE", "LOCATION")) #52 mines are matched directly and uniquely in 1990
+
+unmatch.mine.9091 <- duplicated.test.match %>% 
+	dplyr::select(names(unmatch.mine.9091)) %>% 
+	unique(.) %>% 
+	rbind(., unmatch.mine.9091)
+
+write_csv(match.mine.9091, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-matched1.csv")
+write_csv(unmatch.mine.9091, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-unmatched1.csv")
+```
+
+# Get more mine location from mindat.org
+## Prepare links
+```{r prepare links}
+## prepare links for general and advance search 
+mine.to.scrap <- unmatch.mine.9091 %>% 
+	dplyr::select(PROVINCE, COMPANY, MINESITE, LOCATION)
+test <- mine.to.scrap %>% 
+	filter(MINESITE!="" | LOCATION !="")
+province <- str_replace(test$PROVINCE,"\\b[[:space:]]+\\b", "+" )
+location <- str_replace_all(test$LOCATION,"\\b[[:space:]]*,[[:space:]]*\\b", "+" )
+location <- str_replace_all(location, "\\b[[:space:]]+\\b","+")
+location <- str_replace_all(location, "-","+")
+# location <- location[which(location!="")]
+minesite <- str_replace_all(test$MINESITE, "( Mine)|( Mines)", "")
+minesite <- str_replace_all(minesite, "\\.", " ")
+minesite <- str_replace_all(minesite, "\\b[[:space:]]+\\b", "+" )
+minesite <- str_replace_all(minesite,"The\\+","")
+minesite <- str_replace_all(minesite, "-","+")
+# minesite <- minesite[which()]
+site.location <- paste0(minesite,"+", location)
+site.location <- str_replace_all(site.location, "^\\+","")
+test$PROVINCE.sr <- province
+test$MINESITE.sr <- minesite
+test$LOCATION.sr <- location
+test$site.loc.sr <- site.location
+# gensearch.head <- "https://www.mindat.org/search.php?search="
+advsearch.head <- "https://www.mindat.org/lsearch.php?adv=1&loc="
+test.loc <- test %>% 
+	filter(LOCATION != "")
+test.mine <- test %>% 
+	filter(MINESITE!="" & LOCATION=="")
+#gensearch.link <- paste0(gensearch.head, test.mine$MINESITE.sr, "+", test.mine$PROVINCE.sr,"+","canada") #use minesite, province, location info
+advsearch.link.loc <- paste0(advsearch.head, test.loc$LOCATION.sr,"&tlr=Canada") #use province, location info
+advsearch.link.mine <- paste0(advsearch.head, test.mine$MINESITE.sr,"&tlr=Canada")
+```
+## Advance search by location
+```{r Advance search}
+prov <- tolower(test.loc$PROVINCE)
+prov <- gsub("\\b([a-z])", "\\U\\1", prov, perl = TRUE)
+prov <- gsub("Quebec", "Québec", prov)
+prov <- gsub("Yukon Territory", "Yukon", prov)
+loc <- str_replace_all(test.loc$LOCATION, "\\b[[:space:]]+\\b"," ")
+loc <- str_replace_all(loc, "d'or", "d'Or")
+advsearch.num <- matrix(NA, length(advsearch.link.loc)) # number of returned search results
+advmine.gis <-  matrix(NA, length(advsearch.link.loc)) # gis in one speicific mine page can locate in different places
+advmine.gis2 <-  matrix(NA, length(advsearch.link.loc))
+mine.links <-  matrix(NA, length(advsearch.link.loc))
+mine.links.num <- matrix(NA, length(advsearch.link.loc))
+advsearch.not1 <- matrix(NA, length(advsearch.link.loc)) # check whether advanced search return links of mines
+picked.link <- matrix(NA, length(advsearch.link.loc)) # links from which gis info is scapred
+for (i in 1:length(advsearch.link.loc)) {
+	advsearch.result <- read_html(advsearch.link.loc[i])
+	advsearch.number <- advsearch.result %>% 
+		html_node("p+ p") %>% 
+		html_text()
+	advsearch.not1[i] <- str_detect(advsearch.number, "Search returned:") # 0 or multiple
+	if (is.na(advsearch.not1[i])==TRUE | advsearch.not1[i] == FALSE) { #Only one search result
+		advsearch.num[i] <- 1
+		advsearch.name <- advsearch.result %>% 
+			html_node("h1") %>% 
+			html_text()
+		check.prov <- str_detect(advsearch.name, prov[i])
+		check.table <- advsearch.result %>% 
+			html_node("table")
+		if (check.prov==TRUE & length(check.table)>0) { #scrape two gis info if a table exits
+			tmp <- advsearch.result %>% 
+				html_node("table") %>% 
+				html_table()
+			advmine.gis[i] <- tmp[1,2]
+			advmine.gis2[i] <- tmp[2,2]
+			picked.link[i] <- advsearch.link.loc[i]
+		}
+	} else { # 0 or Multiple search results
+		advsearch.num[i] <- str_extract(advsearch.number, "\\d+") # 0 or >1
+		if (advsearch.num[i] >1) { 
+			links <- LinkExtractor(advsearch.link.loc[i]) #weird return: unknown timezone 'zone/tz/2017c.1.0/zoneinfo/America/Vancouver'
+			links <- str_subset(links[[2]], "/loc-")
+			maxmatch <- 0
+			minloc <- 10
+			for (j in 1:length(links)){
+				advsearch.result2 <- read_html(links[j]) 
+				advsearch.name <- advsearch.result2 %>% 
+					html_node("h1") %>% 
+					html_text()
+				check.prov <- str_detect(advsearch.name, prov[i])
+				check.table <- advsearch.result2 %>% 
+					html_node("table")
+				if (check.prov==FALSE | length(check.table) == 0 | html_text(check.table)==""){
+					links[j] <- NA
+				} else {
+					advsearch.words <- str_split(advsearch.name,",\\s*")[[1]]
+					# locc <- str_split(loc[i],",\\s*")[[1]][1]
+					match <- str_detect(advsearch.words, loc[i])
+					match.num <- sum(match)
+					first.match <- which(match==TRUE)[1]
+					if (match.num > maxmatch & length(check.table) > 0) { 
+						tmp <- advsearch.result2 %>% 
+							html_node("table") %>% 
+							html_table()
+						advmine.gis[i] <- tmp[1,2]
+						advmine.gis2[i] <- tmp[2,2]
+						maxmatch <- match.num
+						minloc <- first.match 
+						picked.link[i] <- links[j]
+					} else if (match.num == maxmatch & length(check.table) > 0 & !is.na(first.match) == TRUE & first.match < minloc){
+						tmp <- advsearch.result2 %>% 
+							html_node("table") %>% 
+							html_table()
+						advmine.gis[i] <- tmp[1,2]
+						advmine.gis2[i] <- tmp[2,2]
+						minloc <- first.match
+						picked.link[i] <- links[j]
+					}
+				}
+			}
+			links <- str_subset(links, "/loc-")
+			mine.links.num[i] <- length(links)
+			mine.links[i] <- paste(links, collapse = " ")
+		}
+	}
+}
+advsearch.output.loc <- data.frame(advsearch.link.loc, advmine.gis, advmine.gis2 , advsearch.not1, advsearch.num, mine.links, mine.links.num, picked.link)
+advsearch.output.loc$advsearch.num <- as.numeric(as.character(advsearch.output.loc$advsearch.num))
+```
+
+## Advance search by minesite
+```{r Advance search}
+prov <- tolower(test.mine$PROVINCE)
+prov <- gsub("\\b([a-z])", "\\U\\1", prov, perl = TRUE)
+prov <- gsub("Quebec", "Québec", prov)
+prov <- gsub("Yukon Territory", "Yukon", prov)
+advsearch.num <- matrix(NA, length(advsearch.link.mine)) # number of returned search results
+advmine.gis <-  matrix(NA, length(advsearch.link.mine)) # gis in one speicific mine page can locate in different places
+advmine.gis2 <-  matrix(NA, length(advsearch.link.mine))
+mine.links <-  matrix(NA, length(advsearch.link.mine))
+mine.links.num <- matrix(NA, length(advsearch.link.mine))
+advsearch.not1 <- matrix(NA, length(advsearch.link.mine)) # check whether advanced search return links of mines
+picked.link <- matrix(NA, length(advsearch.link.mine)) # links from which gis info is scapred
+for (i in 1:length(advsearch.link.mine)) {
+	advsearch.result <- read_html(advsearch.link.mine[i])
+	advsearch.number <- advsearch.result %>% 
+		html_node("p+ p") %>% 
+		html_text()
+	advsearch.not1[i] <- str_detect(advsearch.number, "Search returned:") # 0 or multiple
+	if (is.na(advsearch.not1[i])==TRUE | advsearch.not1[i] == FALSE) { #Only one search result
+		advsearch.num[i] <- 1
+		advsearch.name <- advsearch.result %>% 
+			html_node("h1") %>% 
+			html_text()
+		check.prov <- str_detect(advsearch.name, prov[i])
+		check.table <- advsearch.result %>% 
+			html_node("table")
+		if (check.prov==TRUE & length(check.table)>0) { #scrape two gis info if a table exits
+			tmp <- advsearch.result %>% 
+				html_node("table") %>% 
+				html_table()
+			advmine.gis[i] <- tmp[1,2]
+			advmine.gis2[i] <- tmp[2,2]
+			picked.link[i] <- advsearch.link.mine[i]
+		}
+	} else { # 0 or Multiple search results
+		advsearch.num[i] <- str_extract(advsearch.number, "\\d+") # 0 or >1
+		if (advsearch.num[i] >1) { 
+			links <- LinkExtractor(advsearch.link.mine[i]) #weird return: unknown timezone 'zone/tz/2017c.1.0/zoneinfo/America/Vancouver'
+			links <- str_subset(links[[2]], "/loc-")
+			maxmatch <- 0
+			minloc <- 10
+			for (j in 1:length(links)){
+				advsearch.result2 <- read_html(links[j]) 
+				advsearch.name <- advsearch.result2 %>% 
+					html_node("h1") %>% 
+					html_text()
+				check.prov <- str_detect(advsearch.name, prov[i])
+				check.table <- advsearch.result2 %>% 
+					html_node("table")
+				if (check.prov==FALSE | length(check.table) == 0 | html_text(check.table)==""){
+					links[j] <- NA
+				} else {
+					advsearch.words <- str_split(advsearch.name,",\\s*")[[1]]
+					# locc <- str_split(loc[i],",\\s*")[[1]][1]
+					match <- str_detect(advsearch.words, loc[i])
+					match.num <- sum(match)
+					first.match <- which(match==TRUE)[1]
+					if (match.num > maxmatch & length(check.table) > 0) { 
+						tmp <- advsearch.result2 %>% 
+							html_node("table") %>% 
+							html_table()
+						advmine.gis[i] <- tmp[1,2]
+						advmine.gis2[i] <- tmp[2,2]
+						maxmatch <- match.num
+						minloc <- first.match 
+						picked.link[i] <- links[j]
+					} else if (match.num == maxmatch & length(check.table) > 0 & !is.na(first.match) == TRUE & first.match < minloc){
+						tmp <- advsearch.result2 %>% 
+							html_node("table") %>% 
+							html_table()
+						advmine.gis[i] <- tmp[1,2]
+						advmine.gis2[i] <- tmp[2,2]
+						minloc <- first.match
+						picked.link[i] <- links[j]
+					}
+				}
+			}
+			links <- str_subset(links, "/loc-")
+			mine.links.num[i] <- length(links)
+			mine.links[i] <- paste(links, collapse = " ")
+		}
+	}
+}
+advsearch.output.mine <- data.frame(advsearch.link.mine, advmine.gis, advmine.gis2 , advsearch.not1, advsearch.num, mine.links, mine.links.num, picked.link)
+advsearch.output.mine$advsearch.num <- as.numeric(as.character(advsearch.output.mine$advsearch.num))
+```
+
+
+Spatial join the locations of mines and boundary files (81 and 06) to get CSD attributes.
+```{r}
+names(advsearch.output.mine) <- c("advsearch.link","advmine.gis", "advmine.gis2" , "advsearch.not1", "advsearch.num", "mine.links", "mine.links.num", "picked.link")
+names(advsearch.output.loc) <- c("advsearch.link","advmine.gis", "advmine.gis2" , "advsearch.not1", "advsearch.num", "mine.links", "mine.links.num", "picked.link")
+
+advsearch.output <- rbind(advsearch.output.loc, advsearch.output.mine)
+gis2 <- str_replace(advsearch.output$advmine.gis2, "(~.*)", replacement = "")
+check.gis2 <- str_detect(gis2, "-")
+gis2[which(gis2=="" | check.gis2 == FALSE)] <- NA
+advsearch.output$advmine.gis3 <- gis2
+test <- rbind(test.loc, test.mine)
+tmp <- cbind(test, advsearch.output)
+advsearch.output.test <- tmp %>% 
+	filter(is.na(advmine.gis3)==FALSE)
+gis3 <- str_split(advsearch.output.test$advmine.gis3,",")
+df <- data.frame(matrix(unlist(gis3), nrow=nrow(advsearch.output.test),  byrow=T),stringsAsFactors=FALSE)
+colnames(df) <- c("LATITUDE", "LONGITUDE")
+advsearch.output.test <- cbind(advsearch.output.test,df) # 22 mines got GIS from mindat.org
+inner_join(advsearch.output.test, duplicated.test.match, by = c("PROVINCE", "COMPANY", "MINESITE", "LOCATION")) # check whether mindat.org can help find the location of mines with duplicated CSD
+write_csv(advsearch.output.test, "/Users/batta/Dropbox/phd4/monopsony/mining-r/advsearch-40-test.csv")
+```
+# Match with boundary file using GIS from mindat.org
+```{r}
+mine.sdf <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/advsearch-40-test.csv")
+coordinates(mine.sdf) <- c("LONGITUDE", "LATITUDE")
+class(mine.sdf)
+summary(mine.sdf)
+map.sdf.91 <- readOGR("/Users/batta/Dropbox/phd4/monopsony/map/CSD_91_96_shp_geojson_wgs84/CSD91/shp/L91CSD00_shp", "L91CSD00")
+proj4string(mine.sdf) <- crs(map.sdf.91)
+summary(map.sdf.91)
+mine.attribute <- over(mine.sdf, map.sdf.91)
+mine.bind <- spCbind(mine.sdf, mine.attribute)
+summary(mine.bind)
+```
+
+```{r}
+matched2.CSD <- as.data.frame(mine.bind)
+# matchedCSD.direct <- write_csv(match.mine.8081, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-30th-matched1.csv")
+
+matched2.CSD <- matched2.CSD %>% 
+	dplyr::select(PROVINCE, COMPANY, MINESITE, LOCATION, CSD)
+tmp <- subdiv.91 %>% 
+	dplyr::select(sgcfull, csdname) 
+matched2.CSD <- left_join(matched2.CSD, tmp, by = c("CSD" = "sgcfull"))
+match.mine.9091 <- match.mine.9091 %>% 
+	dplyr::select(PROVINCE, COMPANY, MINESITE, LOCATION, sgcfull, csdname)
+colnames(matched2.CSD) <- c("PROVINCE", "COMPANY", "MINESITE", "LOCATION", "CSDUID", "CSDNAME")
+colnames(match.mine.9091) <- c("PROVINCE", "COMPANY", "MINESITE", "LOCATION", "CSDUID", "CSDNAME")
+
+match.mine.9091.2 <- rbind(match.mine.9091, matched2.CSD) #74 out of 104 matched with CSD
+duplicated(match.mine.9091.2 %>% 
+					 	dplyr::select("PROVINCE", "COMPANY", "MINESITE", "LOCATION"))
+unmatch.mine.9091.2 <- anti_join(metal.mine.90, match.mine.9091.2, by = c("PROVINCE", "COMPANY", "LOCATION")) #Why there are some unmatched minesite?
+write_csv(match.mine.9091.2, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-matched2.csv")
+write_csv(unmatch.mine.9091.2, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-unmatched2.csv")
+```
+* Get information of mines in mine-30th-unmatched2.csv manually and then find CSD code in 2006 boundary file
+```{r}
+matched3 <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-unmatched.csv") # This is the full list of mine data in 1990 manually get.
+unmatch.mine.9091.2 <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-unmatched2.csv") # in order to get the same column class.
+matched3.1 <- inner_join(unmatch.mine.9091.2, matched3, by = c("PROVINCE", "COMPANY", "MINESITE", "LOCATION"))
+
+coord.test <- matched3.1 %>% 
+	dplyr::select(latitude, longitude) %>% 
+	filter(latitude!="" & longitude !="")
+
+coord.test.dec <- coord.test %>% 
+	filter(str_detect(latitude, "\\.")==TRUE)
+coord.test.dec$LATITUDE <- as.numeric(as.character(coord.test.dec$latitude))
+coord.test.dec$LONGITUDE <- as.numeric(as.character(coord.test.dec$longitude))
+coord.test <- coord.test %>% 
+	filter(str_detect(latitude, "\\.")==FALSE)
+
+
+#filter(str_detect(lat_length, ".")==)
+coord.test$lat_degree <- as.numeric(str_extract(coord.test$latitude, "^\\d+"))
+coord.test$lat_minute <- str_extract(coord.test$latitude, " (\\d+)'")
+coord.test$lat_minute <- as.numeric(str_extract(coord.test$lat_minute, "\\d+"))
+coord.test$lat_second <- str_extract(coord.test$latitude, "' (\\d+)")
+coord.test$lat_second <- as.numeric(str_extract(coord.test$lat_second, "\\d+"))
+
+coord.test$lon_degree <- as.numeric(str_extract(coord.test$longitude, "^\\d+"))
+coord.test$lon_minute <- str_extract(coord.test$longitude, " (\\d+)'")
+coord.test$lon_minute <- as.numeric(str_extract(coord.test$lon_minute, "\\d+"))
+coord.test$lon_second <- str_extract(coord.test$longitude, "' (\\d+)")
+coord.test$lon_second <- as.numeric(str_extract(coord.test$lon_second, "\\d+"))
+
+coord.test$LATITUDE <- coord.test$lat_degree + coord.test$lat_minute/60 + coord.test$lat_second/3600
+coord.test$LONGITUDE <- -(coord.test$lon_degree + coord.test$lon_minute/60 + coord.test$lon_second/3600)
+
+
+
+coord <- coord.test %>% 
+	dplyr::select(latitude, longitude, LATITUDE, LONGITUDE) %>% 
+	rbind(coord.test.dec)
+
+matched3.2 <- left_join(matched3.1, coord, by = c("latitude", "longitude"))
+matched3.3 <- matched3.2 %>% 
+	filter(!is.na(LATITUDE))
+coordinates(matched3.3) <- c("LONGITUDE", "LATITUDE")
+proj4string(matched3.3) <- crs(map.sdf.91)
+matched3.3.attribute <- over(matched3.3, map.sdf.91)
+# matched3.3.attribute <- dplyr::rename(matched3.3.attribute, CSDUID = CSD81, CSDNAME = CSD_NAME)
+matched3.3.bind <- spCbind(matched3.3, matched3.3.attribute)
+summary(matched3.3.bind)
+matched3.3.bind <- as.data.frame(matched3.3.bind) #17 CSDs are from GIS information manually graped from Internet
+
+matched3.4 <- left_join(matched3.1, matched3.3.bind)
+matched3.4$CSDUID <- as.numeric(as.character(matched3.4$CSD))
+CSDbind <- matrix(nrow = nrow(matched3.4))
+for (i in 1:nrow(matched3.4)) {
+	CSDbind[i] <- matched3.4$csd91[i]
+	if (is.na(CSDbind[i])) {
+		CSDbind[i] <- matched3.4$CSDUID[i]
+	}
+}
+matched3.4$CSDBIND <- as.character(CSDbind)
+```
+
+```{r}
+matched3.CSD <- matched3.4 %>% 
+	dplyr::select(PROVINCE, COMPANY, MINESITE, LOCATION, CSDBIND)
+csdname <- left_join(matched3.CSD, subdiv.91, by = c("CSDBIND" = "sgcfull"))
+matched3.CSD$CSDNAME <- csdname$csdname
+colnames(matched3.CSD) <- c("PROVINCE", "COMPANY", "MINESITE", "LOCATION", "CSDUID", "CSDNAME")
+
+matched3.CSD <- matched3.CSD %>% 
+	filter(CSDUID!="")
+
+match.mine.9091.3 <- rbind(match.mine.9091.2, matched3.CSD)
+duplicated(match.mine.9091.2, by = c("PROVINCE", "COMPANY", "MINESITE", "LOCATION"))
+unmatch.mine.9091.3 <- anti_join(metal.mine.90, match.mine.9091.3, by = c("PROVINCE", "COMPANY","LOCATION"))
+write_csv(match.mine.9091.3, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-matched3.csv")
+write_csv(unmatch.mine.9091.3, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-40th-unmatched3.csv")
+```

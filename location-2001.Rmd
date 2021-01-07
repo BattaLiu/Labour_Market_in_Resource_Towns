@@ -1,0 +1,46 @@
+---
+title: "location-2001"
+author: "Batta Liu"
+date: '2018-03-09'
+output: html_document
+---
+
+```{r packages, echo=FALSE}
+library(plyr)
+library(dplyr)
+library(readr)
+library(stringr)
+library(rvest)
+library(Rcrawler)
+library(data.table)
+library(RQGIS)
+library(rgdal)
+library(sp)
+library(raster)
+library(maptools)
+library(stringr)
+```
+
+```{r}
+mine.sdf <- read.csv("/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-50th-full.csv")
+mine.sdf <- mine.sdf %>% 
+	filter(INSET1 == "BASEMETAL" | INSET1 == "PRECIOUS" | INSET1 == "FERROUS") %>% 
+	filter(STATUS =="E")
+coordinates(mine.sdf) <- c("LONGITUDE", "LATITUDE")
+class(mine.sdf)
+summary(mine.sdf)
+map.sdf.01 <- readOGR("/Users/batta/Dropbox/phd4/monopsony/map/2001_CSD_shp", "Export_Output")
+proj4string(mine.sdf) <- crs(map.sdf.01)
+summary(map.sdf.01)
+mine.attribute <- over(mine.sdf, map.sdf.01)
+mine.bind <- spCbind(mine.sdf, mine.attribute)
+summary(mine.bind)
+matched2.CSD <- as.data.frame(mine.bind)
+# matchedCSD.direct <- write_csv(match.mine.8081, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-30th-matched1.csv")
+
+matched2.CSD <- matched2.CSD %>% 
+	dplyr::select(PROVINCE, COMPANY, MINESITE, LOCATION, CSDUID,CSDNAME, PRODUCT1, PRODUCT2, PRODUCT3, MAPSYM, GROUP1, GROUP2)
+write_csv(matched2.CSD, "/Users/batta/Dropbox/phd4/monopsony/mining-r/mine-50th-matched3.csv")
+```
+
+
