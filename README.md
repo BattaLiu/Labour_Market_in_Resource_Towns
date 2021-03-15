@@ -1,6 +1,6 @@
 # Labour_Market_in_Resource_Towns
 ## Motivation and Model
-Resource towns in this project are the small isolated communities built around resourcebased
+Resource towns in this project are the small isolated communities built around resource-based
 industries which are greatly affected by commodity prices. Among Canadian resource towns, quite a few of them are one-company towns, which
 are characterised by the presence of a large employer in a local labour market. In this thesis, I propose to study several aspects of the economy in Canadian resource
 towns. 
@@ -19,8 +19,8 @@ information on principal operating mines and metallurgic works.
 5. **mindat.org**: coordinates of mines. This website gives a location-19**.Rmd files combine the [match.Rmd](match.Rmd) and [mindat-scraping.R](mindat-scraping.R) to locate the mines. Used files: NRC 900a map, GAF81-GAF06, boundary files of 2006. It generate an excel file with CSD info for mines at its best. 
 6. [**Geographic Attribut File**](https://www12.statcan.gc.ca/census-recensement/2011/geo/ref/att-eng.cfm) (GAF): contains geographic data at the dissemination block level. The file includes population and dwelling counts, land area, geographic codes, names, unique identifiers and, where applicable, types. Recent census year data can be achieved easily but older years data are stored in some specific libraries. 
 ### Cleaning of geographic data
-One big challenge in this research is to match the mining locations with census data collection area, [CSD](https://www150.statcan.gc.ca/n1/pub/92-195-x/2011001/geo/csd-sdr/def-eng.htm). GAF of different census years provide 7-digit standard CSD code, province name, and CSD name for matching with mine location info from NRC map 900a. If some mines are still unmatched, coordinate data of mines scrapped from mindat.org and boundary files of census are used to improve matching rate.
-Aother challenge is to make sure the mines in different years comparable. Though the mine location don't change, their corresponding CSDs change through these years. My solution has three steps: 
+One big challenge in this research is to match the mining locations with census data collection area, [CSD](https://www150.statcan.gc.ca/n1/pub/92-195-x/2011001/geo/csd-sdr/def-eng.htm). GAF of different census years provide 7-digit standard CSD code, province name, and CSD name for matching with mine location info from NRC map 900a. If some mines are still unmatched, coordinate data of mines scrapped from mindat.org and boundary files of Census are used to improve matching rate.
+Another challenge is to make sure the mines in different years comparable. Though the mine location don't change, their corresponding CSDs change through these years. My solution has three steps: 
 1) Findout the smallest census data collection area, [*EA*/*DA*](http://mchp-appserv.cpe.umanitoba.ca/viewDefinition.php?printer=Y&definitionID=102632), in a CSD .
 2) If the CSDs are unchanged or just renamed, that's good as it is still comparable between two census years. If a CSD is split, we can combine it again. But if a CSD loses and get some EAs at the same change, we need to figure out whether this CSD is still a valid observation. 
 ## [Regression 1](regression1.do)
